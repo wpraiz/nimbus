@@ -31,23 +31,25 @@ final class CaptureManager {
         captureWindow?.close()
         captureWindow = nil
 
-        // Convert from NSWindow flipped coordinates to CGWindowListCreateImage coords
-        let screenHeight = screen.frame.height
-        let cgRect = CGRect(
-            x: selectionRect.origin.x,
-            y: screenHeight - selectionRect.origin.y - selectionRect.height,
-            width: selectionRect.width,
-            height: selectionRect.height
-        )
+        // Wait for the overlay window to fully disappear before capturing
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            let screenHeight = screen.frame.height
+            let cgRect = CGRect(
+                x: selectionRect.origin.x,
+                y: screenHeight - selectionRect.origin.y - selectionRect.height,
+                width: selectionRect.width,
+                height: selectionRect.height
+            )
 
-        guard let screenshot = CGWindowListCreateImage(
-            cgRect,
-            .optionOnScreenOnly,
-            kCGNullWindowID,
-            [.bestResolution, .nominalResolution]
-        ) else { return }
+            guard let screenshot = CGWindowListCreateImage(
+                cgRect,
+                .optionOnScreenOnly,
+                kCGNullWindowID,
+                [.bestResolution, .nominalResolution]
+            ) else { return }
 
-        let image = NSImage(cgImage: screenshot, size: selectionRect.size)
-        AnnotationViewController.show(with: image, sourceRect: selectionRect)
+            let image = NSImage(cgImage: screenshot, size: selectionRect.size)
+            AnnotationViewController.show(with: image, sourceRect: selectionRect)
+        }
     }
 }
