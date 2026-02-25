@@ -37,7 +37,7 @@ final class FloatingToolbar: NSView {
         relayout()
     }
 
-    var intrinsicContentSize: CGSize {
+    override var intrinsicContentSize: CGSize {
         let total = buttons.reduce(0.0) { sum, btn in
             sum + (btn is NSView && !(btn is NimbusButton) ? 1.0 : buttonSize) + spacing
         } - spacing + padding * 2

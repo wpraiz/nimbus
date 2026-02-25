@@ -27,7 +27,7 @@ final class PreferencesManager {
     }
 
     var hotKeyModifiers: Int {
-        get { defaults.integer(forKey: Key.hotKeyModifiers.rawValue).nonZero ?? cmdKey }
+        get { defaults.integer(forKey: Key.hotKeyModifiers.rawValue).nonZero ?? 1048576 } // 1048576 = cmdKey
         set { defaults.set(newValue, forKey: Key.hotKeyModifiers.rawValue) }
     }
 

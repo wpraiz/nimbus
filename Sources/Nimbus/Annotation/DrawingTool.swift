@@ -90,7 +90,7 @@ struct EllipseTool: DrawingTool {
 }
 
 struct PencilTool: DrawingTool {
-    var cursor: NSCursor { .pencil }
+    var cursor: NSCursor { .arrow }
 
     func startPath(at point: CGPoint, color: NSColor, lineWidth: CGFloat) -> Annotation {
         let path = NSBezierPath()
@@ -104,7 +104,7 @@ struct PencilTool: DrawingTool {
 }
 
 struct MarkerTool: DrawingTool {
-    var cursor: NSCursor { .pencil }
+    var cursor: NSCursor { .arrow }
 
     func startPath(at point: CGPoint, color: NSColor, lineWidth: CGFloat) -> Annotation {
         let path = NSBezierPath()

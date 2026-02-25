@@ -86,11 +86,12 @@ final class AnnotationViewController: NSViewController {
         }
 
         let toolbarWidth: CGFloat = 36
+        let toolbarSize = toolbar.intrinsicContentSize
         toolbar.frame = CGRect(
             x: -toolbarWidth - 4,
-            y: view.bounds.height / 2 - toolbar.intrinsicContentSize.height / 2,
+            y: view.bounds.height / 2 - toolbarSize.height / 2,
             width: toolbarWidth,
-            height: toolbar.intrinsicContentSize.height
+            height: toolbarSize.height
         )
         view.addSubview(toolbar)
     }
