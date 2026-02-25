@@ -1,15 +1,10 @@
 import AppKit
 
-// Orchestrates the full capture flow:
-// 1. Show fullscreen overlay for region selection
-// 2. Capture the selected region
-// 3. Hand off screenshot to AnnotationViewController
 final class CaptureManager {
 
     private var captureWindow: CaptureWindow?
 
     func startCapture() {
-        // Slight delay so the menu dismisses before overlay appears
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             self?.showOverlay()
         }
@@ -25,31 +20,42 @@ final class CaptureManager {
             self?.captureWindow = nil
         }
         captureWindow?.makeKeyAndOrderFront(nil)
+        captureWindow?.makeFirstResponder(captureWindow?.contentView)
     }
 
     private func captureRegion(_ selectionRect: CGRect, on screen: NSScreen) {
         captureWindow?.close()
         captureWindow = nil
 
-        // Wait for the overlay window to fully disappear before capturing
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            let screenHeight = screen.frame.height
+        // Wait for overlay to fully disappear
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            // Convert NSView coords (bottom-left origin) to CGWindowListCreateImage coords
             let cgRect = CGRect(
-                x: selectionRect.origin.x,
-                y: screenHeight - selectionRect.origin.y - selectionRect.height,
+                x: selectionRect.origin.x + screen.frame.origin.x,
+                y: screen.frame.height - selectionRect.origin.y - selectionRect.height,
                 width: selectionRect.width,
                 height: selectionRect.height
             )
 
-            guard let screenshot = CGWindowListCreateImage(
-                cgRect,
-                .optionOnScreenOnly,
-                kCGNullWindowID,
-                [.bestResolution, .nominalResolution]
-            ) else { return }
+            guard let cgImage = CGWindowListCreateImage(
+                cgRect, .optionOnScreenOnly, kCGNullWindowID, .bestResolution
+            ) else {
+                // Screen Recording permission not granted
+                DispatchQueue.main.async {
+                    let alert = NSAlert()
+                    alert.messageText = "Screen Recording Permission Required"
+                    alert.informativeText = "Go to System Settings → Privacy & Security → Screen Recording and enable Nimbus."
+                    alert.addButton(withTitle: "Open Settings")
+                    alert.addButton(withTitle: "Cancel")
+                    if alert.runModal() == .alertFirstButtonReturn {
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+                    }
+                }
+                return
+            }
 
-            let image = NSImage(cgImage: screenshot, size: selectionRect.size)
-            AnnotationViewController.show(with: image, sourceRect: selectionRect)
+            let image = NSImage(cgImage: cgImage, size: selectionRect.size)
+            AnnotationWindowController.show(screenshot: image, at: selectionRect, on: screen)
         }
     }
 }

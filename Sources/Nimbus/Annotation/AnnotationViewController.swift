@@ -1,173 +1,268 @@
 import AppKit
 
-final class AnnotationViewController: NSViewController {
+// MARK: - Window Controller (keeps window alive)
 
-    // Static ref keeps window alive until user closes
-    private static var activeWindow: NSWindow?
+final class AnnotationWindowController: NSWindowController {
 
-    private var canvas: DrawingCanvas!
-    private let screenshot: NSImage
-    private let sourceRect: CGRect
+    private static var current: AnnotationWindowController?
+    private let toolbarHeight: CGFloat = 40
+    private let toolbarPad: CGFloat = 6
 
-    static func show(with screenshot: NSImage, sourceRect: CGRect) {
-        activeWindow?.close()
-        activeWindow = nil
+    static func show(screenshot: NSImage, at rect: CGRect, on screen: NSScreen) {
+        current = nil // release previous
 
-        let vc = AnnotationViewController(screenshot: screenshot, sourceRect: sourceRect)
-        let win = NSWindow(
-            contentRect: sourceRect,
-            styleMask: [.borderless],
+        // Window is bigger than the screenshot to fit the toolbar below
+        let toolbarH: CGFloat = 46
+        let winRect = CGRect(
+            x: rect.origin.x,
+            y: rect.origin.y - toolbarH - 4,
+            width: max(rect.width, 320),
+            height: rect.height + toolbarH + 4
+        )
+
+        let win = NSPanel(
+            contentRect: winRect,
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
         win.level = .floating
         win.isOpaque = false
         win.backgroundColor = .clear
+        win.hasShadow = true
+        win.isMovableByWindowBackground = true
+
+        let vc = AnnotationViewController(screenshot: screenshot, screenshotSize: rect.size, toolbarHeight: toolbarH)
         win.contentViewController = vc
-        win.makeKeyAndOrderFront(nil)
+
+        let wc = AnnotationWindowController(window: win)
+        wc.showWindow(nil)
+        current = wc
+
         NSApp.activate(ignoringOtherApps: true)
-        activeWindow = win
     }
 
-    init(screenshot: NSImage, sourceRect: CGRect) {
+    func dismiss() {
+        close()
+        AnnotationWindowController.current = nil
+    }
+}
+
+// MARK: - View Controller
+
+final class AnnotationViewController: NSViewController {
+
+    private let screenshot: NSImage
+    private let screenshotSize: CGSize
+    private let toolbarHeight: CGFloat
+
+    private var canvas: DrawingCanvas!
+    private var selectedToolButton: NSButton?
+
+    init(screenshot: NSImage, screenshotSize: CGSize, toolbarHeight: CGFloat) {
         self.screenshot = screenshot
-        self.sourceRect = sourceRect
+        self.screenshotSize = screenshotSize
+        self.toolbarHeight = toolbarHeight
         super.init(nibName: nil, bundle: nil)
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
     override func loadView() {
-        view = NSView(frame: CGRect(origin: .zero, size: sourceRect.size))
+        let totalHeight = screenshotSize.height + toolbarHeight + 4
+        view = NSView(frame: CGRect(origin: .zero, size: CGSize(width: screenshotSize.width, height: totalHeight)))
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        setupBackground()
         setupCanvas()
-        setupDrawToolbar()
-        setupActionBar()
+        setupToolbar()
+    }
+
+    // MARK: - Setup
+
+    private func setupBackground() {
+        // White border around screenshot
+        let border = NSView(frame: CGRect(
+            x: -1, y: toolbarHeight + 3,
+            width: screenshotSize.width + 2, height: screenshotSize.height + 2
+        ))
+        border.wantsLayer = true
+        border.layer?.backgroundColor = NSColor.white.cgColor
+        view.addSubview(border)
     }
 
     private func setupCanvas() {
-        canvas = DrawingCanvas(frame: view.bounds)
+        canvas = DrawingCanvas(frame: CGRect(
+            origin: CGPoint(x: 0, y: toolbarHeight + 4),
+            size: screenshotSize
+        ))
         canvas.screenshot = screenshot
-        canvas.autoresizingMask = [.width, .height]
         view.addSubview(canvas)
     }
 
-    private func setupDrawToolbar() {
-        let tools: [(String, DrawingTool)] = [
-            ("arrow.up.right", ArrowTool()),
-            ("rectangle",      RectangleTool()),
-            ("circle",         EllipseTool()),
-            ("line.diagonal",  LineTool()),
-            ("pencil",         PencilTool()),
-            ("highlighter",    MarkerTool()),
-        ]
-
-        let toolbar = FloatingToolbar(axis: .vertical)
-        for (icon, tool) in tools {
-            toolbar.addButton(icon: icon) { [weak self] in self?.canvas.selectedTool = tool }
-        }
-        toolbar.addSeparator()
-        toolbar.addButton(icon: "paintpalette") { [weak self] in self?.showColorPicker() }
-        toolbar.addButton(icon: "arrow.uturn.backward") { [weak self] in self?.canvas.undo() }
-
-        let sz = toolbar.intrinsicContentSize
-        toolbar.frame = CGRect(x: -sz.width - 4, y: view.bounds.height/2 - sz.height/2,
-                               width: sz.width, height: sz.height)
-        view.addSubview(toolbar)
-    }
-
-    private func setupActionBar() {
-        let actions: [(String, String, () -> Void)] = [
-            ("arrow.up.to.line",      "Upload", { [weak self] in self?.upload() }),
-            ("doc.on.clipboard",      "Copy",   { [weak self] in self?.copyToClipboard() }),
-            ("square.and.arrow.down", "Save",   { [weak self] in self?.saveToDisk() }),
-            ("printer",               "Print",  { [weak self] in self?.printImage() }),
-            ("xmark",                 "Close",  { [weak self] in self?.closeWindow() }),
-        ]
-
-        let bar = FloatingToolbar(axis: .horizontal)
-        for (icon, label, action) in actions { bar.addButton(icon: icon, label: label, action: action) }
-
-        let barH: CGFloat = 38
-        bar.frame = CGRect(x: 0, y: -barH - 4, width: view.bounds.width, height: barH)
+    private func setupToolbar() {
+        // Toolbar background
+        let bar = NSView(frame: CGRect(x: 0, y: 0, width: view.bounds.width, height: toolbarHeight))
+        bar.wantsLayer = true
+        bar.layer?.backgroundColor = NSColor(calibratedRed: 0.15, green: 0.15, blue: 0.15, alpha: 0.95).cgColor
+        bar.layer?.cornerRadius = 6
         view.addSubview(bar)
+
+        // --- Draw tools (left side) ---
+        let drawTools: [(String, DrawingTool, String)] = [
+            ("arrow.up.right",      ArrowTool(),     "Arrow"),
+            ("rectangle",           RectangleTool(), "Rect"),
+            ("circle",              EllipseTool(),   "Ellipse"),
+            ("line.diagonal",       LineTool(),      "Line"),
+            ("pencil",              PencilTool(),    "Pencil"),
+            ("highlighter",         MarkerTool(),    "Marker"),
+        ]
+
+        var x: CGFloat = 6
+        for (icon, tool, tip) in drawTools {
+            let btn = toolbarButton(icon: icon, tooltip: tip, size: 30)
+            btn.frame = CGRect(x: x, y: 5, width: 30, height: 30)
+            btn.tag = Int(x) // unique tag
+            btn.action = #selector(selectDrawTool(_:))
+            btn.target = self
+            objc_setAssociatedObject(btn, &AssocKey.tool, tool as AnyObject, .OBJC_ASSOCIATION_RETAIN)
+            bar.addSubview(btn)
+            x += 33
+        }
+
+        // Color picker
+        let colorBtn = toolbarButton(icon: "paintpalette", tooltip: "Color", size: 30)
+        colorBtn.frame = CGRect(x: x + 4, y: 5, width: 30, height: 30)
+        colorBtn.action = #selector(pickColor)
+        colorBtn.target = self
+        bar.addSubview(colorBtn)
+        x += 38
+
+        // Undo
+        let undoBtn = toolbarButton(icon: "arrow.uturn.backward", tooltip: "Undo", size: 30)
+        undoBtn.frame = CGRect(x: x + 4, y: 5, width: 30, height: 30)
+        undoBtn.action = #selector(undoAction)
+        undoBtn.target = self
+        bar.addSubview(undoBtn)
+
+        // --- Action buttons (right side) ---
+        let rightActions: [(String, String, Selector)] = [
+            ("xmark",                 "Close",  #selector(closeAction)),
+            ("square.and.arrow.down", "Save",   #selector(saveAction)),
+            ("doc.on.clipboard",      "Copy",   #selector(copyAction)),
+            ("arrow.up.to.line",      "Upload", #selector(uploadAction)),
+        ]
+
+        var rx: CGFloat = view.bounds.width - 6
+        for (icon, tip, sel) in rightActions {
+            rx -= 33
+            let btn = toolbarButton(icon: icon, tooltip: tip, size: 30)
+            btn.frame = CGRect(x: rx, y: 5, width: 30, height: 30)
+            btn.action = sel
+            btn.target = self
+            bar.addSubview(btn)
+        }
     }
 
-    private func upload() {
+    private func toolbarButton(icon: String, tooltip: String, size: CGFloat) -> NSButton {
+        let btn = NSButton(frame: .zero)
+        let config = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+        btn.image = NSImage(systemSymbolName: icon, accessibilityDescription: tooltip)?
+            .withSymbolConfiguration(config)
+        btn.image?.isTemplate = true
+        btn.isBordered = false
+        btn.wantsLayer = true
+        btn.layer?.cornerRadius = 5
+        btn.contentTintColor = .white
+        btn.toolTip = tooltip
+        // Hover highlight
+        btn.layer?.backgroundColor = NSColor.clear.cgColor
+        return btn
+    }
+
+    // MARK: - Actions
+
+    @objc private func selectDrawTool(_ sender: NSButton) {
+        if let tool = objc_getAssociatedObject(sender, &AssocKey.tool) as? DrawingTool {
+            canvas.selectedTool = tool
+        }
+        selectedToolButton?.layer?.backgroundColor = NSColor.clear.cgColor
+        sender.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.2).cgColor
+        selectedToolButton = sender
+    }
+
+    @objc private func pickColor() {
+        NSColorPanel.shared.makeKeyAndOrderFront(nil)
+        NSColorPanel.shared.setTarget(self)
+        NSColorPanel.shared.setAction(#selector(colorChanged(_:)))
+    }
+
+    @objc private func colorChanged(_ sender: NSColorPanel) {
+        canvas.selectedColor = sender.color
+    }
+
+    @objc private func undoAction() { canvas.undo() }
+
+    @objc private func copyAction() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects([canvas.renderedImage()])
+        showToast("Copied!")
+    }
+
+    @objc private func saveAction() {
+        let folder = PreferencesManager.shared.saveFolder
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH.mm.ss"
+        let url = folder.appendingPathComponent("Screenshot \(f.string(from: Date())).png")
+        guard let tiff = canvas.renderedImage().tiffRepresentation,
+              let bmp = NSBitmapImageRep(data: tiff),
+              let png = bmp.representation(using: .png, properties: [:]) else { return }
+        try? png.write(to: url)
+        showToast("Saved!")
+    }
+
+    @objc private func uploadAction() {
+        showToast("Uploading…")
         UploadService.shared.upload(image: canvas.renderedImage()) { [weak self] result in
             DispatchQueue.main.async {
                 switch result {
                 case .success(let url):
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(url, forType: .string)
-                    self?.showToast("Link copiado! 🎉")
-                case .failure(let e):
-                    self?.showToast("Upload falhou: \(e.localizedDescription)")
+                    self?.showToast("Link copied! 🎉")
+                case .failure:
+                    self?.showToast("Upload failed")
                 }
             }
         }
     }
 
-    private func copyToClipboard() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.writeObjects([canvas.renderedImage()])
-        showToast("Copiado!")
+    @objc private func closeAction() {
+        (view.window?.windowController as? AnnotationWindowController)?.dismiss()
     }
 
-    private func saveToDisk() {
-        let folder = PreferencesManager.shared.saveFolder
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let url = folder.appendingPathComponent("Screenshot \(formattedDate()).png")
-        guard let tiff = canvas.renderedImage().tiffRepresentation,
-              let bmp = NSBitmapImageRep(data: tiff),
-              let png = bmp.representation(using: .png, properties: [:]) else { return }
-        try? png.write(to: url)
-        showToast("Salvo em \(folder.lastPathComponent)!")
-    }
-
-    private func printImage() {
-        let v = NSImageView(image: canvas.renderedImage())
-        NSPrintOperation(view: v).run()
-    }
-
-    private func showColorPicker() {
-        NSColorPanel.shared.isVisible
-            ? NSColorPanel.shared.close()
-            : NSColorPanel.shared.makeKeyAndOrderFront(nil)
-        NSColorPanel.shared.setTarget(self)
-        NSColorPanel.shared.setAction(#selector(colorChanged(_:)))
-    }
-
-    @objc private func colorChanged(_ sender: NSColorPanel) { canvas.selectedColor = sender.color }
-
-    private func closeWindow() {
-        AnnotationViewController.activeWindow?.close()
-        AnnotationViewController.activeWindow = nil
-    }
+    // MARK: - Toast
 
     private func showToast(_ msg: String) {
-        let label = NSTextField(labelWithString: msg)
-        label.font = .systemFont(ofSize: 13, weight: .medium)
+        let label = NSTextField(labelWithString: " \(msg) ")
+        label.font = .systemFont(ofSize: 12, weight: .medium)
         label.textColor = .white
-        label.backgroundColor = NSColor.black.withAlphaComponent(0.8)
+        label.backgroundColor = NSColor.black.withAlphaComponent(0.75)
         label.isBezeled = false; label.isEditable = false
+        label.wantsLayer = true; label.layer?.cornerRadius = 4
         label.sizeToFit()
-        let p: CGFloat = 12
-        label.frame = CGRect(x: view.bounds.midX - label.frame.width/2 - p,
-                             y: view.bounds.midY - 15,
-                             width: label.frame.width + p*2, height: 30)
+        label.frame.origin = CGPoint(
+            x: view.bounds.midX - label.frame.width/2,
+            y: toolbarHeight + 8
+        )
         view.addSubview(label)
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            NSAnimationContext.runAnimationGroup({ $0.duration = 0.3; label.animator().alphaValue = 0 }) {
-                label.removeFromSuperview()
-            }
+            label.removeFromSuperview()
         }
     }
-
-    private func formattedDate() -> String {
-        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH.mm.ss"; return f.string(from: Date())
-    }
 }
+
+// Associated object key for storing tool on button
+private enum AssocKey { static var tool = "tool" }
