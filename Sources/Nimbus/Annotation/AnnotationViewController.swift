@@ -26,20 +26,22 @@ final class AnnotationWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        win.level = .floating
+        // Use screenSaver-1 so it appears above normal windows but doesn't fight the overlay
+        win.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.screenSaverWindow)) - 1)
         win.isOpaque = false
         win.backgroundColor = .clear
         win.hasShadow = true
         win.isMovableByWindowBackground = true
+        win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         let vc = AnnotationViewController(screenshot: screenshot, screenshotSize: rect.size, toolbarHeight: toolbarH)
         win.contentViewController = vc
 
         let wc = AnnotationWindowController(window: win)
+        current = wc             // assign BEFORE showWindow so it's retained
         wc.showWindow(nil)
-        current = wc
-
-        NSApp.activate(ignoringOtherApps: true)
+        win.makeKeyAndOrderFront(nil)
+        // NOTE: do NOT call NSApp.activate() — it kills the menu bar icon on LSUIElement apps
     }
 
     func dismiss() {
